@@ -22,7 +22,6 @@ def get_tide(target_date):
     else: return "中潮"
 
 @st.cache_resource
-@st.cache_resource
 def init_connection():
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets',
@@ -41,7 +40,7 @@ except Exception as e:
     db_connected = False
 
 st.title("🎣 釣行記録アプリ")
-st.write("現場でサクッと入力！写真もデータも完全自前クラウドへ！")
+st.write("現場でサクッと入力！最強の爆釣予測AIに向けたデータ収集！")
 
 tab1, tab2 = st.tabs(["📝 記録する", "📊 過去の戦歴を見る"])
 
@@ -51,47 +50,72 @@ with tab1:
     tide_options = ["大潮", "中潮", "小潮", "長潮", "若潮"]
     default_tide_index = tide_options.index(auto_tide)
 
-    with st.form(key='fishing_log'):
-        col_time1, col_time2 = st.columns(2)
-        with col_time1: start_time = st.time_input("開始時間", datetime.time(22, 0))
-        with col_time2: end_time = st.time_input("終了時間", datetime.time(2, 0))
-            
-        st.divider()
-        selected_location = st.selectbox("場所", ["下津井沖", "その他（下に入力）"])
-        location_other = st.text_input("「その他」の場所")
-        selected_targets = st.multiselect("魚種（複数選択可）", ["メバル", "アオリイカ", "アコウ", "アジ", "カサゴ", "シーバス", "その他（下に入力）"])
-        target_other = st.text_input("「その他」の魚種")
-        st.divider()
+    # ★ フォーム(st.form)を廃止し、リアルタイムに動くUIに変更！
+    col_time1, col_time2 = st.columns(2)
+    with col_time1: start_time = st.time_input("開始時間", datetime.time(22, 0))
+    with col_time2: end_time = st.time_input("終了時間", datetime.time(2, 0))
         
-        col_tide1, col_tide2 = st.columns(2)
-        with col_tide1: tide = st.selectbox("潮回り", tide_options, index=default_tide_index)
-        with col_tide2: tide_movements = st.multiselect("潮の動き（複数選択可）", ["満ち潮（上げ）", "引き潮（下げ）", "潮止まり前後"])
+    st.divider()
+    
+    selected_location = st.selectbox("場所", ["下津井沖", "その他（下に入力）"])
+    location_other = st.text_input("「その他」の場所")
+    
+    st.divider()
+    
+    # --- 🐟 魚種と匹数のダイナミック入力エリア ---
+    st.subheader("🐟 釣果の記録（魚種と匹数）")
+    selected_targets = st.multiselect("釣れた魚種を選んでね", ["メバル", "アオリイカ", "アコウ", "アジ", "カサゴ", "シーバス", "その他（下に入力）"])
+    
+    target_results = [] # 最終的な「メバル(10尾)」などの文字列を貯めるリスト
+    
+    if selected_targets:
+        cols = st.columns(3) # 画面を3分割して綺麗に並べる
+        for i, target in enumerate(selected_targets):
+            with cols[i % 3]:
+                # 「その他」が選ばれたら、名前と匹数を両方聞く
+                if target == "その他（下に入力）":
+                    other_name = st.text_input("魚種名", key=f"name_{i}")
+                    count = st.number_input("匹数", min_value=1, step=1, key=f"count_{i}")
+                    if other_name:
+                        target_results.append(f"{other_name}({count}尾)")
+                # それ以外は匹数だけ聞く
+                else:
+                    count = st.number_input(f"{target}の匹数", min_value=1, step=1, key=f"count_{i}")
+                    target_results.append(f"{target}({count}尾)")
+                    
+    # スプレッドシートに書き込むための文字列を生成
+    final_target = "、".join(target_results)
 
-        size = st.number_input("最大サイズ (cm)", min_value=0.0, step=0.5)
-        bait = st.text_input("ベイト（捕食対象）", placeholder="例：アミ、シラス、バチ、イカなど")
+    st.divider()
+    
+    col_tide1, col_tide2 = st.columns(2)
+    with col_tide1: tide = st.selectbox("潮回り", tide_options, index=default_tide_index)
+    with col_tide2: tide_movements = st.multiselect("潮の動き（複数選択可）", ["満ち潮（上げ）", "引き潮（下げ）", "潮止まり前後"])
 
-        photo = st.file_uploader("釣果の写真📸", type=['png', 'jpg', 'jpeg'])
-        memo = st.text_area("メモ（ヒットルアー、複数釣れた時の状況など）")
-        
-        submit_button = st.form_submit_button(label='クラウドDBに完全保存！')
+    size = st.number_input("最大サイズ (cm)", min_value=0.0, step=0.5)
+    bait = st.text_input("ベイト（捕食対象）", placeholder="例：アミ、シラス、バチ、イカなど")
+
+    photo = st.file_uploader("釣果の写真📸", type=['png', 'jpg', 'jpeg'])
+    memo = st.text_area("メモ（ヒットルアー、複数釣れた時の状況など）")
+    
+    # 登録ボタン
+    submit_button = st.button('クラウドDBに完全保存！', type="primary", use_container_width=True)
 
     if submit_button:
         final_location = location_other if selected_location == "その他（下に入力）" else selected_location
-        targets_list = [t for t in selected_targets if t != "その他（下に入力）"]
-        if target_other != "": targets_list.append(target_other)
-        final_target = "、".join(targets_list)
         time_str = f"{start_time.strftime('%H:%M')}〜{end_time.strftime('%H:%M')}"
         final_tide_movement = "、".join(tide_movements) if tide_movements else "未記録"
 
-        if final_location == "" or final_target == "":
-            st.error("⚠️ 場所と魚種はしっかり記録しよう！")
+        if final_location == "":
+            st.error("⚠️ 場所をしっかり記録しよう！")
+        elif not target_results:
+            st.error("⚠️ 魚種と匹数を入力してね！")
         elif final_tide_movement == "未記録":
             st.error("⚠️ 潮の動きを選択してね！")
         elif db_connected:
             image_url = ""
             if photo is not None:
                 try:
-                    # 🚀 GAS（君のドライブ）へ写真を転送！
                     gas_url = st.secrets["gas_url"]
                     base64_image = base64.b64encode(photo.getvalue()).decode("utf-8")
                     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -145,10 +169,8 @@ with tab2:
                             with cols[col_idx]:
                                 img_url = row["画像パス"]
                                 if str(img_url).startswith("http"):
-                                    # 🪄 Googleドライブの制限を回避する「魔法の変換」
                                     if "drive.google.com/uc?id=" in img_url:
                                         img_url = img_url.replace("uc?id=", "thumbnail?id=") + "&sz=w1000"
-                                        
                                     caption_text = f"{row.get('日付', '')}\n{row.get('魚種', '')}\n最大{row.get('最大サイズ(cm)', '')}cm\n({row.get('潮の動き', '')})"
                                     st.image(img_url, caption=caption_text, use_container_width=True)
                     else:
