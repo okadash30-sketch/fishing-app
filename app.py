@@ -1,10 +1,15 @@
 import streamlit as st
 import datetime
 import pandas as pd
-import os
 import json
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import io
+
+# --- 📂 フォルダIDの設定（★ここにコピーしたIDを貼る） ---
+DRIVE_FOLDER_ID = "1lws8xR_vj5ksuGAmJMsujaE4xBvahNjT?ths=true"
 
 # --- 🌕 潮回り自動計算ロジック ---
 def get_tide(target_date):
@@ -21,33 +26,32 @@ def get_tide(target_date):
     elif age in [11, 26]: return "若潮"
     else: return "中潮"
 
-# --- ☁️ スプレッドシート連携（専用ロボットの起動） ---
+# --- ☁️ クラウド連携（シート＆ドライブ） ---
+@st.cache_resource
 def init_connection():
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/drive'
     ]
-    # Streamlitの金庫(Secrets)から合鍵を取り出す
     credentials_dict = json.loads(st.secrets["gcp_json"])
     creds = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
+    
+    # スプレッドシート用とドライブ用の2つのロボットを起動
     client = gspread.authorize(creds)
-    # スプレッドシートを開く（名前が間違っていないか注意！）
-    return client.open("釣行記録DB").sheet1
+    sheet = client.open("釣行記録DB").sheet1
+    drive_service = build('drive', 'v3', credentials=creds)
+    
+    return sheet, drive_service
 
 try:
-    sheet = init_connection()
+    sheet, drive_service = init_connection()
     db_connected = True
 except Exception as e:
     st.error(f"⚠️ データベースとの連携に失敗しました: {e}")
     db_connected = False
 
-# --- 設定部分 ---
-IMAGE_DIR = 'images'
-if not os.path.exists(IMAGE_DIR):
-    os.makedirs(IMAGE_DIR)
-
 st.title("🎣 釣行記録アプリ")
-st.write("現場でサクッと入力！データはクラウドへ永久保存されるよ！")
+st.write("現場でサクッと入力！写真もデータもクラウドに完全保存！")
 
 tab1, tab2 = st.tabs(["📝 記録する", "📊 過去の戦歴を見る"])
 
@@ -86,7 +90,6 @@ with tab1:
 
     if submit_button:
         final_location = location_other if selected_location == "その他（下に入力）" else selected_location
-        
         targets_list = [t for t in selected_targets if t != "その他（下に入力）"]
         if target_other != "": targets_list.append(target_other)
         final_target = "、".join(targets_list)
@@ -99,32 +102,36 @@ with tab1:
         elif final_tide_movement == "未記録":
             st.error("⚠️ 潮の動きを選択してね！")
         elif db_connected:
-            image_path = ""
+            image_url = ""
             if photo is not None:
-                timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-                image_name = f"{timestamp}_{photo.name}"
-                image_path = os.path.join(IMAGE_DIR, image_name)
-                with open(image_path, "wb") as f:
-                    f.write(photo.getbuffer())
+                try:
+                    # ① 画像をメモリ上で準備
+                    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                    image_name = f"{timestamp}_{photo.name}"
+                    media = MediaIoBaseUpload(io.BytesIO(photo.getvalue()), mimetype=photo.type, resumable=True)
+                    
+                    # ② ロボットがGoogleドライブにアップロード
+                    file_metadata = {'name': image_name, 'parents': [DRIVE_FOLDER_ID]}
+                    uploaded_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+                    file_id = uploaded_file.get('id')
+                    
+                    # ③ アプリ上で写真を見れるように権限を開放
+                    drive_service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
+                    
+                    # ④ 直接画像を表示できる魔法のURLを生成
+                    image_url = f"https://drive.google.com/uc?id={file_id}"
+                except Exception as e:
+                    st.error(f"画像のアップロードに失敗しました: {e}")
 
-            # スプレッドシートに書き込むデータの順番（列と合わせる）
+            # スプレッドシートに書き込むデータ（画像はURLとして保存！）
             row_data = [
-                str(date), 
-                time_str, 
-                final_location, 
-                final_target, 
-                tide, 
-                final_tide_movement, 
-                bait, 
-                size, 
-                memo, 
-                image_path
+                str(date), time_str, final_location, final_target, 
+                tide, final_tide_movement, bait, size, memo, image_url
             ]
             
             try:
-                # 🤖 ロボットに書き込みを指示！
                 sheet.append_row(row_data)
-                st.success(f"よし！ {final_location}での記録（{final_target}）をスプレッドシートに保存したよ！")
+                st.success(f"よし！ {final_location}での記録を「写真付き」でクラウドに完全保存したよ！")
             except Exception as e:
                 st.error(f"書き込みエラーが発生しました: {e}")
 
@@ -133,7 +140,6 @@ with tab2:
     
     if db_connected:
         try:
-            # スプレッドシートから全データを取得
             data = sheet.get_all_records()
             if data:
                 df = pd.DataFrame(data)
@@ -150,13 +156,14 @@ with tab2:
                         for i, (index, row) in enumerate(df_with_images.iterrows()):
                             col_idx = i % 3
                             with cols[col_idx]:
-                                img_path = row["画像パス"]
-                                if os.path.exists(img_path):
+                                img_url = row["画像パス"]
+                                # URL（httpから始まる）場合のみ画像を表示
+                                if str(img_url).startswith("http"):
                                     caption_text = f"{row.get('日付', '')}\n{row.get('魚種', '')}\n最大{row.get('最大サイズ(cm)', '')}cm\n({row.get('潮の動き', '')})"
-                                    st.image(img_path, caption=caption_text, use_container_width=True)
+                                    st.image(img_url, caption=caption_text, use_container_width=True)
                     else:
                         st.info("写真付きの記録はまだありません。")
             else:
                 st.info("まだ記録がありません。タブ1から最初の釣果を登録しよう！")
         except Exception as e:
-            st.warning("戦歴の読み込みに失敗しました。見出し（1行目）が正しく入力されているか確認してね。")
+            st.warning("戦歴の読み込みに失敗しました。")
