@@ -22,8 +22,12 @@ def get_tide(target_date):
     else: return "中潮"
 
 @st.cache_resource
+@st.cache_resource
 def init_connection():
-    scopes = ['https://www.googleapis.com/auth/spreadsheets']
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
     credentials_dict = json.loads(st.secrets["gcp_json"])
     creds = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
     client = gspread.authorize(creds)
