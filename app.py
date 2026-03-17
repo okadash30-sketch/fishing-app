@@ -145,6 +145,10 @@ with tab2:
                             with cols[col_idx]:
                                 img_url = row["画像パス"]
                                 if str(img_url).startswith("http"):
+                                    # 🪄 Googleドライブの制限を回避する「魔法の変換」
+                                    if "drive.google.com/uc?id=" in img_url:
+                                        img_url = img_url.replace("uc?id=", "thumbnail?id=") + "&sz=w1000"
+                                        
                                     caption_text = f"{row.get('日付', '')}\n{row.get('魚種', '')}\n最大{row.get('最大サイズ(cm)', '')}cm\n({row.get('潮の動き', '')})"
                                     st.image(img_url, caption=caption_text, use_container_width=True)
                     else:
