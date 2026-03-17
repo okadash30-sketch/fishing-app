@@ -169,8 +169,14 @@ with tab2:
                             with cols[col_idx]:
                                 img_url = row["画像パス"]
                                 if str(img_url).startswith("http"):
-                                    if "drive.google.com/uc?id=" in img_url:
+                                    # 🪄 手動でコピペしたリンク（file/d/...）を自動変換！
+                                    if "drive.google.com/file/d/" in img_url:
+                                        file_id = img_url.split("/d/")[1].split("/")[0]
+                                        img_url = f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
+                                    # アプリから登録したリンク（uc?id=...）を自動変換
+                                    elif "drive.google.com/uc?id=" in img_url:
                                         img_url = img_url.replace("uc?id=", "thumbnail?id=") + "&sz=w1000"
+                                        
                                     caption_text = f"{row.get('日付', '')}\n{row.get('魚種', '')}\n最大{row.get('最大サイズ(cm)', '')}cm\n({row.get('潮の動き', '')})"
                                     st.image(img_url, caption=caption_text, use_container_width=True)
                     else:
