@@ -9,7 +9,7 @@ from googleapiclient.http import MediaIoBaseUpload
 import io
 
 # --- 📂 フォルダIDの設定（★ここにコピーしたIDを貼る） ---
-DRIVE_FOLDER_ID = "1lws8xR_vj5ksuGAmJMsujaE4xBvahNjT?ths=true"
+DRIVE_FOLDER_ID = "1lws8xR_vj5ksuGAmJMsujaE4xBvahNjT"
 
 # --- 🌕 潮回り自動計算ロジック ---
 def get_tide(target_date):
